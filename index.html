@@ -3,39 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Chat Edition</title>
+    <title>Neon Plaza | Secure Admin</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        :root { --neon: #00f2ff; --void: #020205; }
+        :root { --neon: #00f2ff; --admin: #ff3c00; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* UI Panels */
+        /* UPDATED MENU */
+        #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .menu-input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 220px; border-radius: 5px; outline: none; text-align: center; margin-bottom: 10px; display: block; }
+        .admin-code-input { border-color: #444; font-size: 11px; color: #888; }
+        .admin-code-input:focus { border-color: var(--admin); color: var(--admin); }
+        
+        /* ADMIN PANEL */
+        #admin-panel {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 350px; background: rgba(10, 5, 5, 0.95); border: 2px solid var(--admin);
+            padding: 20px; border-radius: 10px; z-index: 200; display: none;
+            box-shadow: 0 0 50px rgba(255, 60, 0, 0.3);
+        }
+        .admin-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .admin-btn { background: var(--admin); border: none; color: white; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; }
+        
+        /* HUD & CHAT */
         #hud, #chat-container { position: absolute; z-index: 10; pointer-events: none; }
         #hud { top: 20px; left: 20px; }
         #chat-container { bottom: 20px; left: 20px; width: 280px; pointer-events: all; }
-        
-        .panel { background: rgba(0,0,0,0.85); border: 1px solid var(--neon); padding: 12px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,242,255,0.2); }
-        
-        /* Chat Styling */
-        #messages { height: 120px; overflow-y: auto; font-size: 13px; color: #aaa; margin-bottom: 8px; display: flex; flex-direction: column; }
-        #chat-in { background: #111; border: 1px solid var(--neon); color: white; padding: 10px; width: 100%; box-sizing: border-box; outline: none; border-radius: 4px; }
-        
-        #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
-        .btn { background: var(--neon); color: black; border: none; padding: 12px 30px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 15px; }
-        
+        .panel { background: rgba(0,0,0,0.85); border: 1px solid var(--neon); padding: 12px; border-radius: 8px; }
+        #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #aaa; margin-bottom: 8px; }
+        #chat-in { background: #111; border: 1px solid var(--neon); color: white; padding: 10px; width: 100%; box-sizing: border-box; outline: none; }
+        #announcement { position: fixed; top: 20%; width: 100%; text-align: center; font-size: 2rem; font-weight: bold; color: var(--admin); text-shadow: 0 0 20px var(--admin); display: none; z-index: 150; pointer-events: none;}
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="start-menu">
-        <div class="panel" style="text-align: center; width: 300px;">
+        <div class="panel" style="text-align: center; width: 300px; pointer-events: all;">
             <h1 style="color:var(--neon); margin:0 0 20px;">NEON PLAZA</h1>
-            <input type="text" id="name-in" placeholder="YOUR NAME" maxlength="10" style="padding:10px; text-align:center;">
-            <br>
-            <button class="btn" onclick="enterGame()">ENTER</button>
+            <input type="text" id="name-in" class="menu-input" placeholder="DISPLAY NAME" maxlength="10">
+            <input type="password" id="admin-in" class="menu-input admin-code-input" placeholder="ADMIN CODE [OPTIONAL]">
+            <button onclick="enterGame()" style="background:var(--neon); border:none; padding:12px 40px; margin-top:10px; cursor:pointer; font-weight:bold; border-radius:5px; width:100%;">ENTER PLAZA</button>
         </div>
     </div>
+
+    <div id="admin-panel">
+        <h2 style="color:var(--admin); margin-top:0; letter-spacing: 2px; text-align: center;">ADMIN CONSOLE</h2>
+        <div class="admin-row">
+            <span>Room Gravity</span>
+            <input type="range" id="grav-slide" min="1" max="10" value="6" oninput="changeGrav(this.value)">
+        </div>
+        <div class="admin-row">
+            <button class="admin-btn" onclick="sendAlert()">SEND GLOBAL ALERT</button>
+        </div>
+        <div class="admin-row">
+            <button class="admin-btn" style="background:#555" onclick="resetWorld()">RESET WORLD GRAVITY</button>
+        </div>
+        <div style="font-size: 10px; opacity: 0.5; text-align: center; margin-top: 10px;">F2 TO HIDE</div>
+    </div>
+
+    <div id="announcement">SERVER ALERT!</div>
 
     <div id="hud">
         <div class="panel">
@@ -54,8 +81,13 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        let client, players = {}, keys = { w: false, a: false, s: false, d: false };
-        const TOPIC = "v1/plaza/chat/2026";
+        const SECRET_ADMIN_CODE = "1234"; // <--- CHANGE YOUR CODE HERE
+        
+        let client, players = {}, keys = {};
+        const TOPIC = "v1/plaza/secure_admin/2026";
+        
+        let worldGravity = 0.6;
+        let isAdmin = false;
 
         const me = {
             id: 'u' + Math.random().toString(36).substr(2, 5),
@@ -66,8 +98,15 @@
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            if(!name) return;
+            const adminCode = document.getElementById('admin-in').value;
+            if(!name) return alert("Please enter a name");
+            
             me.name = name.toUpperCase();
+            if(adminCode === SECRET_ADMIN_CODE) {
+                isAdmin = true;
+                console.log("Admin Privileges Unlocked");
+            }
+
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('chat-container').style.display = 'block';
             initMulti();
@@ -78,72 +117,79 @@
             client.on('connect', () => {
                 document.getElementById('status').innerText = "LIVE";
                 client.subscribe(TOPIC);
-                setInterval(broadcastPos, 50); // Move sync
+                setInterval(() => {
+                    if(client.connected) client.publish(TOPIC, JSON.stringify({ type:'pos', ...me }));
+                }, 50);
             });
 
             client.on('message', (topic, message) => {
                 const data = JSON.parse(message.toString());
                 if (data.id === me.id) return;
-
-                if (data.type === 'chat') {
-                    handleIncomingChat(data);
-                } else {
-                    if (!players[data.id]) {
-                        players[data.id] = {...data, targetX: data.x, targetY: data.y};
-                    } else {
-                        players[data.id].targetX = data.x;
-                        players[data.id].targetY = data.y;
-                        players[data.id].name = data.name;
-                    }
+                if (data.type === 'chat') addChatMessage(data.name, data.text);
+                if (data.type === 'alert') triggerAlert(data.text);
+                if (data.type === 'grav') worldGravity = data.value;
+                if (data.type === 'pos') {
+                    if (!players[data.id]) players[data.id] = {...data, targetX: data.x, targetY: data.y};
+                    else { players[data.id].targetX = data.x; players[data.id].targetY = data.y; }
                 }
             });
             draw();
         }
 
-        function broadcastPos() {
-            if (client?.connected) {
-                client.publish(TOPIC, JSON.stringify({
-                    id: me.id, name: me.name, x: me.x, y: me.y, color: me.color
-                }));
+        // --- ADMIN CONTROLS ---
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'F2') {
+                e.preventDefault();
+                if(!isAdmin) return alert("You are not an admin!");
+                const panel = document.getElementById('admin-panel');
+                panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
             }
+            keys[e.key.toLowerCase()] = true;
+        });
+
+        function changeGrav(val) {
+            worldGravity = val / 10;
+            client.publish(TOPIC, JSON.stringify({ type: 'grav', value: worldGravity, id: me.id }));
         }
 
+        function sendAlert() {
+            const txt = prompt("Global Announcement:");
+            if(txt) client.publish(TOPIC, JSON.stringify({ type: 'alert', text: txt, id: me.id }));
+        }
+
+        function resetWorld() {
+            changeGrav(6);
+            document.getElementById('grav-slide').value = 6;
+        }
+
+        function triggerAlert(txt) {
+            const el = document.getElementById('announcement');
+            el.innerText = txt; el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 4000);
+        }
+
+        // --- CORE LOGIC ---
         function sendChat() {
             const input = document.getElementById('chat-in');
-            if(!input.value || !client?.connected) return;
-            
-            const payload = { type: 'chat', id: me.id, name: me.name, text: input.value };
-            client.publish(TOPIC, JSON.stringify(payload));
-            
-            me.msg = input.value;
-            me.msgTime = Date.now();
-            addChatMessage(me.name, input.value, true);
+            if(!input.value) return;
+            client.publish(TOPIC, JSON.stringify({ type: 'chat', id: me.id, name: me.name, text: input.value }));
+            me.msg = input.value; me.msgTime = Date.now();
+            addChatMessage(me.name, input.value);
             input.value = '';
         }
 
-        function handleIncomingChat(data) {
-            addChatMessage(data.name, data.text, false);
-            if (players[data.id]) {
-                players[data.id].msg = data.text;
-                players[data.id].msgTime = Date.now();
-            }
-        }
-
-        function addChatMessage(name, text, isMe) {
+        function addChatMessage(name, text) {
             const msgBox = document.getElementById('messages');
-            const div = document.createElement('div');
-            div.innerHTML = `<b style="color:${isMe ? 'var(--neon)' : '#fff'}">${name}:</b> ${text}`;
-            msgBox.appendChild(div);
+            msgBox.innerHTML += `<div><b>${name}:</b> ${text}</div>`;
             msgBox.scrollTop = msgBox.scrollHeight;
         }
 
-        window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
-        window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
+        window.onkeyup = (e) => { keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            const acc = 0.6, fric = 0.9;
-            if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
-            if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
+            const fric = 0.9;
+            if (keys['w']) me.vy -= worldGravity; if (keys['s']) me.vy += worldGravity;
+            if (keys['a']) me.vx -= worldGravity; if (keys['d']) me.vx += worldGravity;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
 
@@ -155,32 +201,18 @@
         }
 
         function draw() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
             ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             update();
-
-            const all = [...Object.values(players), me];
-            all.forEach(p => {
-                // Circle
+            [...Object.values(players), me].forEach(p => {
                 ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-                ctx.shadowBlur = 0;
-                
-                // Name
-                ctx.fillStyle = "white"; ctx.textAlign = "center";
+                ctx.shadowBlur = 0; ctx.fillStyle = "white"; ctx.textAlign = "center";
                 ctx.font = "bold 12px sans-serif";
                 ctx.fillText(p.name, p.x, p.y + 35);
-
-                // Bubble
-                if (p.msg && Date.now() - p.msgTime < 5000) {
-                    ctx.fillStyle = "rgba(255,255,255,0.9)";
-                    ctx.font = "italic 13px sans-serif";
-                    ctx.fillText(p.msg, p.x, p.y - 30);
-                }
+                if (p.msg && Date.now() - p.msgTime < 5000) ctx.fillText(p.msg, p.x, p.y - 30);
             });
-
             requestAnimationFrame(draw);
         }
     </script>
