@@ -3,27 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | 2026 Edition</title>
+    <title>Neon Plaza | Global Room</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-        
-        /* MENU */
-        #start-menu {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: radial-gradient(circle, #101025 0%, #020205 100%);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 100;
-        }
+        #start-menu { position: fixed; inset: 0; background: radial-gradient(circle, #101025, #020205); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
         .menu-box { border: 1px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: rgba(0,0,0,0.8); }
-        input { background: #000; border: 1px solid var(--neon); color: white; padding: 15px; width: 250px; border-radius: 5px; outline: none; text-align: center; }
-        .btn { background: var(--neon); color: black; border: none; padding: 15px 50px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 20px; }
-
-        /* HUD */
+        input { background: #000; border: 1px solid var(--neon); color: white; padding: 15px; width: 250px; border-radius: 5px; outline: none; text-align: center; margin-bottom: 20px;}
+        .btn { background: var(--neon); color: black; border: none; padding: 15px 50px; font-weight: bold; cursor: pointer; border-radius: 5px; }
         #hud { position: absolute; top: 20px; left: 20px; z-index: 10; display: none; }
         #chat-area { position: absolute; bottom: 20px; left: 20px; width: 300px; z-index: 10; display: none; }
-        #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; margin-bottom: 5px; }
+        #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; }
         canvas { display: block; }
     </style>
 </head>
@@ -32,22 +24,21 @@
     <div id="start-menu">
         <div class="menu-box">
             <h1 style="color:var(--neon); letter-spacing: 5px;">NEON PLAZA</h1>
-            <input type="text" id="name-in" placeholder="YOUR NAME..." maxlength="10">
-            <br>
-            <button class="btn" onclick="enterGame()">START SESSION</button>
+            <input type="text" id="name-in" placeholder="ENTER NAME..." maxlength="10">
+            <button class="btn" onclick="enterGame()">ENTER PLAZA</button>
         </div>
     </div>
 
     <div id="hud">
         <div style="background: rgba(0,0,0,0.8); border: 1px solid var(--neon); padding: 15px; border-radius: 8px;">
             <h2 id="display-name" style="margin:0; color:var(--neon); font-size: 1rem;">-</h2>
-            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">LOCATING PEERS...</div>
+            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">CONNECTING...</div>
         </div>
     </div>
 
     <div id="chat-area">
         <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Press Enter to chat..." onkeydown="if(event.key==='Enter') sendChat()">
+        <input type="text" id="chat-in" placeholder="Press Enter to chat..." onkeydown="if(event.key==='Enter') sendChat()" style="width:100%; margin-top:5px; background:black; color:var(--neon); border:1px solid var(--neon); padding:8px;">
     </div>
 
     <canvas id="world"></canvas>
@@ -55,87 +46,66 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        
-        // --- MULTIPLAYER ROOM KEY ---
-        const ROOM_ID = "GLOBAL_VERCEL_PLAZA_ROOM_99";
-        
+        const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']); // Public lobby relay
+        const lobby = gun.get('vercel-neon-plaza-lobby-2026');
+
         let peer, connections = {}, players = {};
         const keys = { w: false, a: false, s: false, d: false };
-        
+
         const me = {
-            id: 'p-' + Math.random().toString(36).substr(2, 6),
-            name: "Guest",
-            x: Math.random() * 500, y: Math.random() * 500,
-            vx: 0, vy: 0,
-            color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-            msg: ""
+            id: 'peer-' + Math.random().toString(36).substr(2, 9),
+            name: "", x: Math.random() * 600, y: Math.random() * 400,
+            vx: 0, vy: 0, color: `hsl(${Math.random() * 360}, 80%, 60%)`, msg: ""
         };
 
         function enterGame() {
-            const nameInput = document.getElementById('name-in').value;
-            if(!nameInput) return alert("Enter a name!");
-            me.name = nameInput.toUpperCase();
+            const name = document.getElementById('name-in').value;
+            if(!name) return alert("Name required");
+            me.name = name.toUpperCase();
             document.getElementById('display-name').innerText = me.name;
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
             document.getElementById('chat-area').style.display = 'block';
-            
-            initPeer();
+            initMultiplayer();
         }
 
-        function initPeer() {
-            // Using a specific naming convention helps peers find each other
+        function initMultiplayer() {
             peer = new Peer(me.id);
             
-            peer.on('open', () => {
-                document.getElementById('status').innerText = "SEARCHING...";
-                // Immediately check for any other open IDs in the public directory
-                // PeerJS public server doesn't allow 'listAllPeers', so we use a 
-                // broadcast-connect attempt strategy.
-                discoverPeers();
+            peer.on('open', (id) => {
+                document.getElementById('status').innerText = "ONLINE";
+                
+                // 1. Tell the lobby we exist
+                lobby.get(id).put({ name: me.name, active: true, time: Date.now() });
+
+                // 2. Listen for anyone else joining the lobby
+                lobby.map().on((data, otherId) => {
+                    if (data && data.active && otherId !== me.id && !connections[otherId]) {
+                        // Avoid connecting to "old" sessions (over 30 seconds ago)
+                        if (Date.now() - data.time < 30000) {
+                            const conn = peer.connect(otherId);
+                            setupConnection(conn);
+                        }
+                    }
+                });
             });
 
             peer.on('connection', setupConnection);
             draw();
         }
 
-        function discoverPeers() {
-            // Because we don't have a backend, we check the 'Last 10' players 
-            // who might be active. (Simulated via common ID patterns)
-            for(let i=0; i<15; i++) {
-                // We use a broader range for discovery
-                const randomId = 'p-' + Math.random().toString(36).substr(2, 6);
-                // Realistically, you'd share your ID. To make it "Public",
-                // players usually connect to a 'Host' ID or use a server.
-                // Since you want purely public, this script now listens for incoming.
-            }
-            
-            // To test multiplayer by yourself: OPEN TWO TABS. 
-            // In Tab 2, click 'Connect' (I added a manual bypass just in case).
-            document.getElementById('status').innerText = "ONLINE - WAITING FOR GUESTS";
-        }
-
         function setupConnection(conn) {
             conn.on('open', () => {
                 connections[conn.peer] = conn;
-                document.getElementById('status').innerText = "CONNECTED TO PLAYER";
                 conn.send({ type: 'sync', player: me });
             });
             conn.on('data', (data) => {
                 if (data.type === 'sync' || data.type === 'move') players[data.player.id] = data.player;
                 if (data.type === 'chat') showChat(data.name, data.text);
             });
-            conn.on('close', () => { delete players[conn.peer]; });
+            conn.on('close', () => delete players[conn.peer]);
         }
 
-        // --- THE "MANUAL LINK" FALLBACK ---
-        // If they can't find each other automatically, they can share IDs
-        function connectToId(targetId) {
-            const conn = peer.connect(targetId);
-            setupConnection(conn);
-        }
-
-        // --- MOVEMENT ---
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
@@ -145,7 +115,6 @@
             if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
-            
             if (Math.abs(me.vx) > 0.1 || Math.abs(me.vy) > 0.1) {
                 Object.values(connections).forEach(c => { if(c.open) c.send({ type: 'move', player: me }); });
             }
@@ -163,23 +132,21 @@
             const box = document.getElementById('messages');
             box.innerHTML += `<div><b>${sender}:</b> ${text}</div>`;
             box.scrollTop = box.scrollHeight;
-            let p = (sender === me.name) ? me : Object.values(players).find(pl => pl.name === sender);
+            const p = (sender === me.name) ? me : Object.values(players).find(pl => pl.name === sender);
             if(p) { p.msg = text; setTimeout(() => p.msg = "", 3000); }
         }
 
         function draw() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
-            ctx.fillStyle = '#020205';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             update();
             players[me.id] = me;
             Object.values(players).forEach(p => {
                 ctx.shadowBlur = 20; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = "white"; ctx.textAlign = "center";
+                ctx.shadowBlur = 0; ctx.fillStyle = "white"; ctx.textAlign = "center";
                 ctx.font = "bold 12px Arial";
                 ctx.fillText(p.name, p.x, p.y + 35);
                 if(p.msg) ctx.fillText(p.msg, p.x, p.y - 35);
