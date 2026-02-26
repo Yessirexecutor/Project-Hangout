@@ -3,33 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Smooth Sync</title>
+    <title>Neon Plaza | Chat Edition</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
-        body { margin: 0; background: var(--void); color: white; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        /* UI Panels */
+        #hud, #chat-container { position: absolute; z-index: 10; pointer-events: none; }
+        #hud { top: 20px; left: 20px; }
+        #chat-container { bottom: 20px; left: 20px; width: 280px; pointer-events: all; }
+        
+        .panel { background: rgba(0,0,0,0.85); border: 1px solid var(--neon); padding: 12px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,242,255,0.2); }
+        
+        /* Chat Styling */
+        #messages { height: 120px; overflow-y: auto; font-size: 13px; color: #aaa; margin-bottom: 8px; display: flex; flex-direction: column; }
+        #chat-in { background: #111; border: 1px solid var(--neon); color: white; padding: 10px; width: 100%; box-sizing: border-box; outline: none; border-radius: 4px; }
+        
         #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
-        .menu-box { border: 2px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: #000; }
-        input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 180px; border-radius: 5px; outline: none; text-align: center; }
         .btn { background: var(--neon); color: black; border: none; padding: 12px 30px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 15px; }
-        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); border-radius: 5px; display: none; }
+        
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="start-menu">
-        <div class="menu-box">
+        <div class="panel" style="text-align: center; width: 300px;">
             <h1 style="color:var(--neon); margin:0 0 20px;">NEON PLAZA</h1>
-            <input type="text" id="name-in" placeholder="NAME" maxlength="10">
+            <input type="text" id="name-in" placeholder="YOUR NAME" maxlength="10" style="padding:10px; text-align:center;">
             <br>
-            <button class="btn" onclick="enterGame()">START</button>
+            <button class="btn" onclick="enterGame()">ENTER</button>
         </div>
     </div>
 
     <div id="hud">
-        <div id="status">Syncing...</div>
-        <div id="pop">Players: 1</div>
+        <div class="panel">
+            <div id="status">Connecting...</div>
+            <div id="pop">Players: 1</div>
+        </div>
+    </div>
+
+    <div id="chat-container" style="display:none;">
+        <div id="messages"></div>
+        <input type="text" id="chat-in" placeholder="Press Enter to talk..." onkeydown="if(event.key==='Enter') sendChat()">
     </div>
 
     <canvas id="world"></canvas>
@@ -37,82 +54,103 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        
-        let client;
-        let players = {}; 
-        const keys = { w: false, a: false, s: false, d: false };
-        const TOPIC = "v1/plaza/smooth/2026";
+        let client, players = {}, keys = { w: false, a: false, s: false, d: false };
+        const TOPIC = "v1/plaza/chat/2026";
 
         const me = {
             id: 'u' + Math.random().toString(36).substr(2, 5),
             name: "", x: 300, y: 300, vx: 0, vy: 0,
-            color: `hsl(${Math.random() * 360}, 80%, 60%)`
+            color: `hsl(${Math.random() * 360}, 80%, 60%)`,
+            msg: "", msgTime: 0
         };
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            if(!name) return alert("Name?");
+            if(!name) return;
             me.name = name.toUpperCase();
             document.getElementById('start-menu').style.display = 'none';
-            document.getElementById('hud').style.display = 'block';
+            document.getElementById('chat-container').style.display = 'block';
             initMulti();
         }
 
         function initMulti() {
             client = mqtt.connect('wss://test.mosquitto.org:8081');
             client.on('connect', () => {
-                document.getElementById('status').innerText = "STABLE";
+                document.getElementById('status').innerText = "LIVE";
                 client.subscribe(TOPIC);
-                // Send heartbeat every 50ms instead of every frame
-                setInterval(broadcast, 50); 
+                setInterval(broadcastPos, 50); // Move sync
             });
 
             client.on('message', (topic, message) => {
                 const data = JSON.parse(message.toString());
-                if (data.id !== me.id) {
-                    // If player is new, add them
+                if (data.id === me.id) return;
+
+                if (data.type === 'chat') {
+                    handleIncomingChat(data);
+                } else {
                     if (!players[data.id]) {
-                        players[data.id] = data;
-                        players[data.id].targetX = data.x;
-                        players[data.id].targetY = data.y;
+                        players[data.id] = {...data, targetX: data.x, targetY: data.y};
                     } else {
-                        // Store the new position to glide towards
                         players[data.id].targetX = data.x;
                         players[data.id].targetY = data.y;
                         players[data.id].name = data.name;
-                        players[data.id].color = data.color;
                     }
                 }
             });
             draw();
         }
 
-        function broadcast() {
-            if (client && client.connected) {
+        function broadcastPos() {
+            if (client?.connected) {
                 client.publish(TOPIC, JSON.stringify({
                     id: me.id, name: me.name, x: me.x, y: me.y, color: me.color
                 }));
             }
         }
 
+        function sendChat() {
+            const input = document.getElementById('chat-in');
+            if(!input.value || !client?.connected) return;
+            
+            const payload = { type: 'chat', id: me.id, name: me.name, text: input.value };
+            client.publish(TOPIC, JSON.stringify(payload));
+            
+            me.msg = input.value;
+            me.msgTime = Date.now();
+            addChatMessage(me.name, input.value, true);
+            input.value = '';
+        }
+
+        function handleIncomingChat(data) {
+            addChatMessage(data.name, data.text, false);
+            if (players[data.id]) {
+                players[data.id].msg = data.text;
+                players[data.id].msgTime = Date.now();
+            }
+        }
+
+        function addChatMessage(name, text, isMe) {
+            const msgBox = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.innerHTML = `<b style="color:${isMe ? 'var(--neon)' : '#fff'}">${name}:</b> ${text}`;
+            msgBox.appendChild(div);
+            msgBox.scrollTop = msgBox.scrollHeight;
+        }
+
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            // My Local Movement (Instant & Smooth)
             const acc = 0.6, fric = 0.9;
             if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
             if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
 
-            // Interpolation for OTHER players (The "Anti-Lag" part)
             Object.values(players).forEach(p => {
-                // Glide 20% of the way to the target position every frame
                 p.x += (p.targetX - p.x) * 0.2;
                 p.y += (p.targetY - p.y) * 0.2;
             });
-            
             document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length + 1);
         }
 
@@ -120,16 +158,27 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
             update();
 
-            [...Object.values(players), me].forEach(p => {
+            const all = [...Object.values(players), me];
+            all.forEach(p => {
+                // Circle
                 ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
                 ctx.shadowBlur = 0;
+                
+                // Name
                 ctx.fillStyle = "white"; ctx.textAlign = "center";
+                ctx.font = "bold 12px sans-serif";
                 ctx.fillText(p.name, p.x, p.y + 35);
+
+                // Bubble
+                if (p.msg && Date.now() - p.msgTime < 5000) {
+                    ctx.fillStyle = "rgba(255,255,255,0.9)";
+                    ctx.font = "italic 13px sans-serif";
+                    ctx.fillText(p.msg, p.x, p.y - 30);
+                }
             });
 
             requestAnimationFrame(draw);
