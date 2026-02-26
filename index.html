@@ -3,74 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Admin Authority</title>
+    <title>Neon Plaza | Global Broadcast</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         :root { --neon: #00f2ff; --admin: #ff3c00; --gold: #ffd700; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* MENU */
+        /* START MENU */
         #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .panel { background: rgba(0,0,0,0.85); border: 1px solid var(--neon); padding: 20px; border-radius: 8px; }
         .menu-input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 220px; border-radius: 5px; outline: none; text-align: center; margin-bottom: 10px; display: block; }
-        .admin-code-input { border-color: #444; font-size: 11px; color: #888; transition: 0.3s; }
-        .admin-code-input:focus { border-color: var(--admin); color: var(--admin); }
         
-        /* ADMIN PANEL */
+        /* ADMIN CONSOLE (TOP RIGHT) */
         #admin-panel {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 350px; background: rgba(10, 5, 5, 0.95); border: 2px solid var(--admin);
-            padding: 20px; border-radius: 10px; z-index: 200; display: none;
-            box-shadow: 0 0 50px rgba(255, 60, 0, 0.3);
+            position: fixed; top: 20px; right: 20px; width: 220px; 
+            background: rgba(10, 5, 5, 0.95); border: 1px solid var(--admin);
+            padding: 15px; border-radius: 5px; z-index: 200; display: none;
+            box-shadow: 0 0 20px rgba(255, 60, 0, 0.4);
         }
-        .admin-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .admin-btn { background: var(--admin); border: none; color: white; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; }
+        .admin-title { color: var(--admin); font-size: 10px; font-weight: bold; letter-spacing: 2px; margin-bottom: 10px; text-transform: uppercase; }
+        .admin-btn { background: var(--admin); border: none; color: white; padding: 8px; cursor: pointer; font-size: 11px; font-weight: bold; width: 100%; border-radius: 3px; margin-top: 5px; }
         
-        /* UI */
-        #hud, #chat-container { position: absolute; z-index: 10; pointer-events: none; }
-        #hud { top: 20px; left: 20px; }
-        #chat-container { bottom: 20px; left: 20px; width: 280px; pointer-events: all; }
-        .panel { background: rgba(0,0,0,0.85); border: 1px solid var(--neon); padding: 12px; border-radius: 8px; }
+        /* GLOBAL ALERT OVERLAY */
+        #announcement {
+            position: fixed; top: 30%; width: 100%; text-align: center; 
+            font-size: 3rem; font-weight: 900; color: white;
+            text-shadow: 0 0 10px var(--admin), 0 0 30px var(--admin);
+            display: none; z-index: 999; pointer-events: none;
+            animation: pulse 0.5s infinite alternate;
+        }
+        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.05); } }
+
+        /* UI HUD */
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
+        #chat-container { position: absolute; bottom: 20px; left: 20px; width: 280px; z-index: 10; pointer-events: all; }
         #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #aaa; margin-bottom: 8px; }
-        #chat-in { background: #111; border: 1px solid var(--neon); color: white; padding: 10px; width: 100%; box-sizing: border-box; outline: none; }
-        #announcement { position: fixed; top: 20%; width: 100%; text-align: center; font-size: 2rem; font-weight: bold; color: var(--admin); text-shadow: 0 0 20px var(--admin); display: none; z-index: 150; pointer-events: none;}
+        #chat-in { background: #111; border: 1px solid var(--neon); color: white; padding: 10px; width: 100%; box-sizing: border-box; outline: none; border-radius: 4px; }
+        
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="start-menu">
-        <div class="panel" style="text-align: center; width: 300px; pointer-events: all;">
+        <div class="panel" style="text-align: center;">
             <h1 style="color:var(--neon); margin:0 0 20px;">NEON PLAZA</h1>
             <input type="text" id="name-in" class="menu-input" placeholder="DISPLAY NAME" maxlength="10">
-            <input type="password" id="admin-in" class="menu-input admin-code-input" placeholder="ADMIN CODE [OPTIONAL]">
-            <button onclick="enterGame()" style="background:var(--neon); border:none; padding:12px 40px; margin-top:10px; cursor:pointer; font-weight:bold; border-radius:5px; width:100%;">ENTER PLAZA</button>
+            <input type="password" id="admin-in" class="menu-input" placeholder="ADMIN CODE">
+            <button onclick="enterGame()" style="background:var(--neon); border:none; padding:12px; cursor:pointer; font-weight:bold; border-radius:5px; width:100%;">JOIN PLAZA</button>
         </div>
     </div>
 
     <div id="admin-panel">
-        <h2 style="color:var(--admin); margin-top:0; letter-spacing: 2px; text-align: center;">ADMIN CONSOLE</h2>
-        <div class="admin-row">
-            <span>Room Gravity</span>
-            <input type="range" id="grav-slide" min="1" max="10" value="6" oninput="changeGrav(this.value)">
-        </div>
-        <div class="admin-row">
-            <button class="admin-btn" onclick="sendAlert()">SEND GLOBAL ALERT</button>
-        </div>
-        <div style="font-size: 10px; opacity: 0.5; text-align: center;">PRESS F2 TO TOGGLE</div>
+        <div class="admin-title">Admin Console</div>
+        <button class="admin-btn" onclick="sendGlobalAlert()">📢 GLOBAL ANNOUNCEMENT</button>
+        <button class="admin-btn" style="background:#444" onclick="toggleSpeed()">🚀 SPEED HACK (ME)</button>
+        <div style="font-size: 9px; opacity: 0.5; margin-top: 10px; text-align: center;">F2 TO HIDE</div>
     </div>
 
-    <div id="announcement">SERVER ALERT!</div>
+    <div id="announcement">ADMIN ALERT</div>
 
     <div id="hud">
-        <div class="panel">
-            <div id="status">Connecting...</div>
+        <div class="panel" style="padding: 10px; font-size: 12px;">
+            <div id="status" style="color:var(--neon)">Syncing...</div>
             <div id="pop">Players: 1</div>
         </div>
     </div>
 
     <div id="chat-container" style="display:none;">
         <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Say something..." onkeydown="if(event.key==='Enter') sendChat()">
+        <input type="text" id="chat-in" placeholder="Type message..." onkeydown="if(event.key==='Enter') sendChat()">
     </div>
 
     <canvas id="world"></canvas>
@@ -81,14 +83,14 @@
         const SECRET_CODE = "Bellaisbrown1";
         
         let client, players = {}, keys = {};
-        const TOPIC = "v1/plaza/authority/2026";
+        const TOPIC = "v1/plaza/broadcast/2026";
         
-        let worldGravity = 0.6;
         let isAdmin = false;
+        let baseSpeed = 5;
 
         const me = {
             id: 'u' + Math.random().toString(36).substr(2, 5),
-            name: "", x: 300, y: 300, vx: 0, vy: 0,
+            name: "", x: 300, y: 300, 
             color: `hsl(${Math.random() * 360}, 80%, 60%)`,
             isAdm: false, msg: "", msgTime: 0
         };
@@ -102,7 +104,7 @@
             if(code === SECRET_CODE) {
                 isAdmin = true;
                 me.isAdm = true;
-                me.color = "#ffffff"; // Admins get white core
+                me.color = "#ffffff";
             }
 
             document.getElementById('start-menu').style.display = 'none';
@@ -113,7 +115,7 @@
         function initMulti() {
             client = mqtt.connect('wss://test.mosquitto.org:8081');
             client.on('connect', () => {
-                document.getElementById('status').innerText = "LIVE";
+                document.getElementById('status').innerText = "ONLINE";
                 client.subscribe(TOPIC);
                 setInterval(() => {
                     if(client.connected) client.publish(TOPIC, JSON.stringify({ type:'pos', ...me }));
@@ -122,19 +124,21 @@
 
             client.on('message', (topic, message) => {
                 const data = JSON.parse(message.toString());
-                if (data.id === me.id) return;
-                if (data.type === 'chat') addChatMessage(data.name, data.text, data.isAdm);
-                if (data.type === 'alert') triggerAlert(data.text);
-                if (data.type === 'grav') worldGravity = data.value;
-                if (data.type === 'pos') {
+                if (data.id === me.id && data.type !== 'alert') return; // Ignore own movement, but process alerts
+
+                if (data.type === 'alert') {
+                    displayAlert(data.text);
+                } else if (data.type === 'chat') {
+                    addChatMessage(data.name, data.text, data.isAdm);
+                } else if (data.type === 'pos') {
                     if (!players[data.id]) players[data.id] = {...data, tx: data.x, ty: data.y};
-                    else { players[data.id].tx = data.x; players[data.id].ty = data.y; players[data.id].isAdm = data.isAdm; }
+                    else { players[data.id].tx = data.x; players[data.id].ty = data.y; players[data.id].isAdm = data.isAdm; players[data.id].color = data.color;}
                 }
             });
             draw();
         }
 
-        // --- ADMIN ---
+        // --- ADMIN COMMANDS ---
         window.addEventListener('keydown', (e) => {
             if (e.key === 'F2' && isAdmin) {
                 const p = document.getElementById('admin-panel');
@@ -143,23 +147,30 @@
             keys[e.key.toLowerCase()] = true;
         });
 
-        function changeGrav(v) {
-            worldGravity = v / 10;
-            client.publish(TOPIC, JSON.stringify({ type: 'grav', value: worldGravity, id: me.id }));
+        function sendGlobalAlert() {
+            const t = prompt("ENTER YOUR GLOBAL MESSAGE:");
+            if(t) {
+                client.publish(TOPIC, JSON.stringify({ 
+                    type: 'alert', 
+                    text: t, 
+                    id: me.id 
+                }));
+            }
         }
 
-        function sendAlert() {
-            const t = prompt("Alert message:");
-            if(t) client.publish(TOPIC, JSON.stringify({ type: 'alert', text: t, id: me.id }));
-        }
-
-        function triggerAlert(t) {
+        function displayAlert(t) {
             const e = document.getElementById('announcement');
-            e.innerText = t; e.style.display = 'block';
-            setTimeout(() => e.style.display = 'none', 4000);
+            e.innerText = t;
+            e.style.display = 'block';
+            // Play a small sound if you want, or just flash
+            setTimeout(() => { e.style.display = 'none'; }, 5000);
         }
 
-        // --- CORE ---
+        function toggleSpeed() {
+            baseSpeed = baseSpeed === 5 ? 12 : 5;
+        }
+
+        // --- CORE CHAT & DRAW ---
         function sendChat() {
             const i = document.getElementById('chat-in');
             if(!i.value) return;
@@ -178,10 +189,10 @@
         window.onkeyup = (e) => { keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            const f = 0.9;
-            if (keys['w']) me.vy -= worldGravity; if (keys['s']) me.vy += worldGravity;
-            if (keys['a']) me.vx -= worldGravity; if (keys['d']) me.vx += worldGravity;
-            me.vx *= f; me.vy *= f; me.x += me.vx; me.y += me.vy;
+            if (keys['w']) me.y -= baseSpeed;
+            if (keys['s']) me.y += baseSpeed;
+            if (keys['a']) me.x -= baseSpeed;
+            if (keys['d']) me.x += baseSpeed;
 
             Object.values(players).forEach(p => {
                 p.x += (p.tx - p.x) * 0.2; p.y += (p.ty - p.y) * 0.2;
@@ -194,28 +205,18 @@
             ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             update();
             [...Object.values(players), me].forEach(p => {
-                // Admin Aura
                 if(p.isAdm) {
-                    ctx.shadowBlur = 30; ctx.shadowColor = "red";
+                    ctx.shadowBlur = 25; ctx.shadowColor = "red";
                     ctx.strokeStyle = "red"; ctx.lineWidth = 2;
                     ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, Math.PI*2); ctx.stroke();
                 }
-
                 ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-                
                 ctx.shadowBlur = 0; ctx.fillStyle = "white"; ctx.textAlign = "center";
                 ctx.font = "bold 12px sans-serif";
                 ctx.fillText(p.name, p.x, p.y + 35);
-
-                // Admin Crown Icon
-                if(p.isAdm) {
-                    ctx.fillStyle = "gold";
-                    ctx.font = "16px Arial";
-                    ctx.fillText("👑", p.x, p.y - 20);
-                }
-
+                if(p.isAdm) { ctx.fillStyle = "gold"; ctx.font = "16px Arial"; ctx.fillText("👑", p.x, p.y - 20); }
                 if (p.msg && Date.now() - p.msgTime < 5000) {
                     ctx.fillStyle = "white"; ctx.font = "italic 12px sans-serif";
                     ctx.fillText(p.msg, p.x, p.y - (p.isAdm ? 40 : 25));
