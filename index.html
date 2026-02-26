@@ -3,27 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Global Lobby</title>
+    <title>Neon Plaza | Stable Multi</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        :root { --neon: #00f2ff; --pink: #ff007b; --void: #020205; }
+        :root { --neon: #00f2ff; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* --- START MENU --- */
         #start-menu {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: radial-gradient(circle, #101025 0%, #020205 100%);
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 100; transition: 0.5s;
+            z-index: 100;
         }
         .menu-box {
             background: rgba(255, 255, 255, 0.03);
             padding: 40px; border-radius: 15px; border: 1px solid var(--neon);
-            text-align: center; box-shadow: 0 0 30px rgba(0, 242, 255, 0.1);
+            text-align: center;
         }
-        h1 { font-size: 3rem; margin: 0 0 20px; color: var(--neon); letter-spacing: 5px; }
-        
         input#name-in {
             background: #000; border: 1px solid var(--neon); color: white;
             padding: 15px; width: 250px; font-size: 1.1rem; border-radius: 5px;
@@ -32,14 +28,10 @@
         .start-btn {
             background: var(--neon); color: black; border: none;
             padding: 15px 50px; font-size: 1.2rem; font-weight: bold;
-            cursor: pointer; border-radius: 5px; transition: 0.3s;
+            cursor: pointer; border-radius: 5px;
         }
-        .start-btn:hover { background: white; box-shadow: 0 0 20px white; }
 
-        /* --- GAME UI --- */
         #hud { position: absolute; top: 20px; left: 20px; z-index: 10; display: none; }
-        .panel { background: rgba(0,0,0,0.9); border: 1px solid var(--neon); padding: 15px; border-radius: 8px; }
-        
         #chat-area { position: absolute; bottom: 20px; left: 20px; width: 300px; z-index: 10; display: none; }
         #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; margin-bottom: 5px; }
         input#chat-in { background: #000; border: 1px solid var(--neon); color: var(--neon); padding: 10px; width: 100%; box-sizing: border-box; }
@@ -51,24 +43,23 @@
 
     <div id="start-menu">
         <div class="menu-box">
-            <h1>NEON PLAZA</h1>
-            <input type="text" id="name-in" placeholder="ENTER NAME..." maxlength="12">
+            <h1 style="color:var(--neon); letter-spacing: 5px;">NEON PLAZA</h1>
+            <input type="text" id="name-in" placeholder="YOUR NAME..." maxlength="10">
             <br>
-            <button class="start-btn" onclick="enterGame()">START GAME</button>
+            <button class="start-btn" onclick="enterGame()">ENTER PLAZA</button>
         </div>
     </div>
 
     <div id="hud">
-        <div class="panel">
-            <h2 id="display-name" style="margin:0; color:var(--neon)">-</h2>
-            <div id="status" style="font-size: 0.8rem; opacity: 0.6;">Connecting...</div>
-            <div style="margin-top:10px; font-size: 0.7rem;">POPULATION: <span id="pop-count">1</span></div>
+        <div style="background: rgba(0,0,0,0.8); border: 1px solid var(--neon); padding: 15px; border-radius: 8px;">
+            <h2 id="display-name" style="margin:0; color:var(--neon); font-size: 1rem;">-</h2>
+            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">SEARCHING FOR PEERS...</div>
         </div>
     </div>
 
     <div id="chat-area">
         <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Say hello..." onkeydown="if(event.key==='Enter') sendChat()">
+        <input type="text" id="chat-in" placeholder="Chat..." onkeydown="if(event.key==='Enter') sendChat()">
     </div>
 
     <canvas id="world"></canvas>
@@ -76,16 +67,14 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        const TOPIC = "neon_plaza_discovery_v1";
         
-        let peer, mqttClient, connections = {}, players = {};
+        let peer, connections = {}, players = {};
         const keys = { w: false, a: false, s: false, d: false };
         
         const me = {
-            id: 'p-' + Math.random().toString(36).substr(2, 6),
+            id: 'plaza-' + Math.floor(Math.random() * 1000), // Simplified ID for discovery
             name: "Guest",
-            x: Math.random() * 400 + 200,
-            y: Math.random() * 400 + 200,
+            x: Math.random() * 500, y: Math.random() * 500,
             vx: 0, vy: 0,
             color: `hsl(${Math.random() * 360}, 80%, 60%)`,
             msg: ""
@@ -93,56 +82,55 @@
 
         function enterGame() {
             const nameInput = document.getElementById('name-in').value;
-            if(!nameInput) return alert("Please enter a name!");
-            
+            if(!nameInput) return alert("Enter a name!");
             me.name = nameInput.toUpperCase();
             document.getElementById('display-name').innerText = me.name;
-            
-            // Hide Menu, Show Game
-            document.getElementById('start-menu').style.opacity = '0';
-            setTimeout(() => {
-                document.getElementById('start-menu').style.display = 'none';
-                document.getElementById('hud').style.display = 'block';
-                document.getElementById('chat-area').style.display = 'block';
-                initMultiplayer();
-            }, 500);
+            document.getElementById('start-menu').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('chat-area').style.display = 'block';
+            initPeer();
         }
 
-        function initMultiplayer() {
+        function initPeer() {
             peer = new Peer(me.id);
-            mqttClient = mqtt.connect('wss://test.mosquitto.org:8081');
 
-            mqttClient.on('connect', () => {
-                mqttClient.subscribe(TOPIC);
-                mqttClient.publish(TOPIC, me.id);
-                document.getElementById('status').innerText = "ONLINE";
-            });
-
-            mqttClient.on('message', (topic, message) => {
-                const strangerId = message.toString();
-                if (strangerId !== me.id && !connections[strangerId]) {
-                    const conn = peer.connect(strangerId);
-                    setupConnection(conn);
-                }
+            peer.on('open', (id) => {
+                console.log("Joined as: " + id);
+                // Discovery Loop: Try to find players 0-1000
+                findPeers();
             });
 
             peer.on('connection', setupConnection);
-            draw(); // Start the loop
+            draw();
+        }
+
+        async function findPeers() {
+            document.getElementById('status').innerText = "SCANNING PLAZA...";
+            // We check a range of IDs to see who is online
+            for(let i=0; i<20; i++) {
+                let targetId = 'plaza-' + Math.floor(Math.random() * 1000);
+                if(targetId !== me.id && !connections[targetId]) {
+                    let conn = peer.connect(targetId);
+                    setupConnection(conn);
+                }
+            }
+            setTimeout(findPeers, 10000); // Re-scan every 10 seconds
         }
 
         function setupConnection(conn) {
             conn.on('open', () => {
                 connections[conn.peer] = conn;
+                document.getElementById('status').innerText = "CONNECTED";
                 conn.send({ type: 'sync', player: me });
             });
             conn.on('data', (data) => {
                 if (data.type === 'sync' || data.type === 'move') {
                     players[data.player.id] = data.player;
-                    document.getElementById('pop-count').innerText = Object.keys(players).length;
                 }
                 if (data.type === 'chat') showChat(data.name, data.text);
             });
-            conn.on('close', () => { delete players[conn.peer]; });
+            conn.on('close', () => { delete players[conn.peer]; delete connections[conn.peer]; });
+            conn.on('error', () => { /* Handle failed attempts silently */ });
         }
 
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
@@ -155,30 +143,28 @@
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
 
-            if (Math.abs(me.vx) > 0.05 || Math.abs(me.vy) > 0.05) {
-                broadcast({ type: 'move', player: me });
+            if (Math.abs(me.vx) > 0.1 || Math.abs(me.vy) > 0.1) {
+                Object.values(connections).forEach(c => {
+                    if(c.open) c.send({ type: 'move', player: me });
+                });
             }
-        }
-
-        function broadcast(data) {
-            Object.values(connections).forEach(c => { if(c.open) c.send(data); });
         }
 
         function sendChat() {
             const input = document.getElementById('chat-in');
             if(!input.value) return;
             showChat(me.name, input.value);
-            broadcast({ type: 'chat', name: me.name, text: input.value });
+            Object.values(connections).forEach(c => {
+                if(c.open) c.send({ type: 'chat', name: me.name, text: input.value });
+            });
             input.value = '';
         }
 
-        function showChat(senderName, text) {
+        function showChat(sender, text) {
             const box = document.getElementById('messages');
-            box.innerHTML += `<div><b style="color:var(--neon)">${senderName}:</b> ${text}</div>`;
+            box.innerHTML += `<div><b>${sender}:</b> ${text}</div>`;
             box.scrollTop = box.scrollHeight;
-            
-            // Link chat to the player bubble
-            let p = (senderName === me.name) ? me : Object.values(players).find(pl => pl.name === senderName);
+            let p = (sender === me.name) ? me : Object.values(players).find(pl => pl.name === sender);
             if(p) { p.msg = text; setTimeout(() => p.msg = "", 3000); }
         }
 
@@ -191,22 +177,14 @@
 
             players[me.id] = me;
             Object.values(players).forEach(p => {
-                // Smooth Orb
                 ctx.shadowBlur = 20; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
                 ctx.shadowBlur = 0;
-
-                // Name tag
                 ctx.fillStyle = "white"; ctx.textAlign = "center";
                 ctx.font = "bold 12px Arial";
                 ctx.fillText(p.name, p.x, p.y + 35);
-
-                // Bubble
-                if(p.msg) {
-                    ctx.font = "14px Arial";
-                    ctx.fillText(p.msg, p.x, p.y - 35);
-                }
+                if(p.msg) ctx.fillText(p.msg, p.x, p.y - 35);
             });
             requestAnimationFrame(draw);
         }
