@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | No-Key Multi</title>
+    <title>Neon Plaza | Smooth Sync</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
@@ -12,7 +12,7 @@
         .menu-box { border: 2px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: #000; }
         input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 180px; border-radius: 5px; outline: none; text-align: center; }
         .btn { background: var(--neon); color: black; border: none; padding: 12px 30px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 15px; }
-        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); display: none; border-radius: 5px; }
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); border-radius: 5px; display: none; }
         canvas { display: block; }
     </style>
 </head>
@@ -28,7 +28,7 @@
     </div>
 
     <div id="hud">
-        <div id="status">Connecting to Public Relay...</div>
+        <div id="status">Syncing...</div>
         <div id="pop">Players: 1</div>
     </div>
 
@@ -39,9 +39,9 @@
         const ctx = canvas.getContext('2d');
         
         let client;
-        let players = {};
+        let players = {}; 
         const keys = { w: false, a: false, s: false, d: false };
-        const ROOM_TOPIC = "v1/plaza/global/main"; // Unique topic for everyone using this code
+        const TOPIC = "v1/plaza/smooth/2026";
 
         const me = {
             id: 'u' + Math.random().toString(36).substr(2, 5),
@@ -51,7 +51,7 @@
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            if(!name) return alert("Enter Name");
+            if(!name) return alert("Name?");
             me.name = name.toUpperCase();
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
@@ -59,30 +59,39 @@
         }
 
         function initMulti() {
-            // Using a public websocket relay (No API key needed)
             client = mqtt.connect('wss://test.mosquitto.org:8081');
-
             client.on('connect', () => {
-                document.getElementById('status').innerText = "ONLINE";
-                client.subscribe(ROOM_TOPIC);
-                // Send an "I'm here" message
-                broadcast();
+                document.getElementById('status').innerText = "STABLE";
+                client.subscribe(TOPIC);
+                // Send heartbeat every 50ms instead of every frame
+                setInterval(broadcast, 50); 
             });
 
             client.on('message', (topic, message) => {
                 const data = JSON.parse(message.toString());
                 if (data.id !== me.id) {
-                    players[data.id] = data;
-                    document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length + 1);
+                    // If player is new, add them
+                    if (!players[data.id]) {
+                        players[data.id] = data;
+                        players[data.id].targetX = data.x;
+                        players[data.id].targetY = data.y;
+                    } else {
+                        // Store the new position to glide towards
+                        players[data.id].targetX = data.x;
+                        players[data.id].targetY = data.y;
+                        players[data.id].name = data.name;
+                        players[data.id].color = data.color;
+                    }
                 }
             });
-
             draw();
         }
 
         function broadcast() {
             if (client && client.connected) {
-                client.publish(ROOM_TOPIC, JSON.stringify(me));
+                client.publish(TOPIC, JSON.stringify({
+                    id: me.id, name: me.name, x: me.x, y: me.y, color: me.color
+                }));
             }
         }
 
@@ -90,23 +99,21 @@
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            const acc = 0.5, fric = 0.9;
-            let moved = false;
-            if (keys.w) { me.vy -= acc; moved = true; }
-            if (keys.s) { me.vy += acc; moved = true; }
-            if (keys.a) { me.vx -= acc; moved = true; }
-            if (keys.d) { me.vx += acc; moved = true; }
-
+            // My Local Movement (Instant & Smooth)
+            const acc = 0.6, fric = 0.9;
+            if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
+            if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
 
-            // Simple screen wrap
-            if (me.x < 0) me.x = canvas.width;
-            if (me.x > canvas.width) me.x = 0;
-            if (me.y < 0) me.y = canvas.height;
-            if (me.y > canvas.height) me.y = 0;
-
-            if (moved || Math.abs(me.vx) > 0.1) broadcast();
+            // Interpolation for OTHER players (The "Anti-Lag" part)
+            Object.values(players).forEach(p => {
+                // Glide 20% of the way to the target position every frame
+                p.x += (p.targetX - p.x) * 0.2;
+                p.y += (p.targetY - p.y) * 0.2;
+            });
+            
+            document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length + 1);
         }
 
         function draw() {
@@ -116,25 +123,16 @@
             
             update();
 
-            // Draw Others
-            Object.values(players).forEach(p => {
-                drawPlayer(p);
+            [...Object.values(players), me].forEach(p => {
+                ctx.shadowBlur = 15; ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = "white"; ctx.textAlign = "center";
+                ctx.fillText(p.name, p.x, p.y + 35);
             });
 
-            // Draw Me
-            drawPlayer(me);
-
             requestAnimationFrame(draw);
-        }
-
-        function drawPlayer(p) {
-            ctx.shadowBlur = 15; ctx.shadowColor = p.color;
-            ctx.fillStyle = p.color;
-            ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = "white"; ctx.textAlign = "center";
-            ctx.font = "bold 12px sans-serif";
-            ctx.fillText(p.name, p.x, p.y + 35);
         }
     </script>
 </body>
