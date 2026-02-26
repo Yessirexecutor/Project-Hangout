@@ -3,39 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Stable Multi</title>
+    <title>Neon Plaza | Global</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
+        /* MENU */
         #start-menu {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: radial-gradient(circle, #101025 0%, #020205 100%);
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             z-index: 100;
         }
-        .menu-box {
-            background: rgba(255, 255, 255, 0.03);
-            padding: 40px; border-radius: 15px; border: 1px solid var(--neon);
-            text-align: center;
-        }
-        input#name-in {
-            background: #000; border: 1px solid var(--neon); color: white;
-            padding: 15px; width: 250px; font-size: 1.1rem; border-radius: 5px;
-            outline: none; text-align: center; margin-bottom: 20px;
-        }
-        .start-btn {
-            background: var(--neon); color: black; border: none;
-            padding: 15px 50px; font-size: 1.2rem; font-weight: bold;
-            cursor: pointer; border-radius: 5px;
-        }
+        .menu-box { border: 1px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: rgba(0,0,0,0.8); }
+        input { background: #000; border: 1px solid var(--neon); color: white; padding: 15px; width: 250px; border-radius: 5px; outline: none; text-align: center; }
+        .btn { background: var(--neon); color: black; border: none; padding: 15px 50px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 20px; }
 
+        /* HUD */
         #hud { position: absolute; top: 20px; left: 20px; z-index: 10; display: none; }
         #chat-area { position: absolute; bottom: 20px; left: 20px; width: 300px; z-index: 10; display: none; }
         #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; margin-bottom: 5px; }
-        input#chat-in { background: #000; border: 1px solid var(--neon); color: var(--neon); padding: 10px; width: 100%; box-sizing: border-box; }
-        
         canvas { display: block; }
     </style>
 </head>
@@ -46,20 +34,20 @@
             <h1 style="color:var(--neon); letter-spacing: 5px;">NEON PLAZA</h1>
             <input type="text" id="name-in" placeholder="YOUR NAME..." maxlength="10">
             <br>
-            <button class="start-btn" onclick="enterGame()">ENTER PLAZA</button>
+            <button class="btn" onclick="enterGame()">START SESSION</button>
         </div>
     </div>
 
     <div id="hud">
         <div style="background: rgba(0,0,0,0.8); border: 1px solid var(--neon); padding: 15px; border-radius: 8px;">
             <h2 id="display-name" style="margin:0; color:var(--neon); font-size: 1rem;">-</h2>
-            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">SEARCHING FOR PEERS...</div>
+            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">Syncing with Global Lobby...</div>
         </div>
     </div>
 
     <div id="chat-area">
         <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Chat..." onkeydown="if(event.key==='Enter') sendChat()">
+        <input type="text" id="chat-in" placeholder="Press Enter to chat..." onkeydown="if(event.key==='Enter') sendChat()">
     </div>
 
     <canvas id="world"></canvas>
@@ -68,11 +56,14 @@
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
         
+        // This is a public test lobby database (Firebase)
+        const LOBBY_URL = "https://neon-plaza-default-rtdb.firebaseio.com/lobby.json";
+        
         let peer, connections = {}, players = {};
         const keys = { w: false, a: false, s: false, d: false };
         
         const me = {
-            id: 'plaza-' + Math.floor(Math.random() * 1000), // Simplified ID for discovery
+            id: 'id-' + Math.random().toString(36).substr(2, 9),
             name: "Guest",
             x: Math.random() * 500, y: Math.random() * 500,
             vx: 0, vy: 0,
@@ -88,51 +79,57 @@
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
             document.getElementById('chat-area').style.display = 'block';
+            
             initPeer();
         }
 
         function initPeer() {
             peer = new Peer(me.id);
-
             peer.on('open', (id) => {
-                console.log("Joined as: " + id);
-                // Discovery Loop: Try to find players 0-1000
-                findPeers();
+                addToLobby(id);
+                setInterval(refreshLobby, 5000); // Check for new people every 5s
+                refreshLobby();
             });
-
             peer.on('connection', setupConnection);
             draw();
         }
 
-        async function findPeers() {
-            document.getElementById('status').innerText = "SCANNING PLAZA...";
-            // We check a range of IDs to see who is online
-            for(let i=0; i<20; i++) {
-                let targetId = 'plaza-' + Math.floor(Math.random() * 1000);
-                if(targetId !== me.id && !connections[targetId]) {
-                    let conn = peer.connect(targetId);
+        // --- THE "FIX" ---
+        // Instead of guessing, we tell a database we are online.
+        async function addToLobby(id) {
+            await fetch(`https://neon-plaza-default-rtdb.firebaseio.com/lobby/${id}.json`, {
+                method: 'PUT',
+                body: JSON.stringify({ active: true, time: Date.now() })
+            });
+        }
+
+        async function refreshLobby() {
+            const res = await fetch(LOBBY_URL);
+            const data = await res.json();
+            if(!data) return;
+
+            Object.keys(data).forEach(peerId => {
+                if(peerId !== me.id && !connections[peerId]) {
+                    const conn = peer.connect(peerId);
                     setupConnection(conn);
                 }
-            }
-            setTimeout(findPeers, 10000); // Re-scan every 10 seconds
+            });
         }
 
         function setupConnection(conn) {
             conn.on('open', () => {
                 connections[conn.peer] = conn;
-                document.getElementById('status').innerText = "CONNECTED";
+                document.getElementById('status').innerText = "ONLINE";
                 conn.send({ type: 'sync', player: me });
             });
             conn.on('data', (data) => {
-                if (data.type === 'sync' || data.type === 'move') {
-                    players[data.player.id] = data.player;
-                }
+                if (data.type === 'sync' || data.type === 'move') players[data.player.id] = data.player;
                 if (data.type === 'chat') showChat(data.name, data.text);
             });
-            conn.on('close', () => { delete players[conn.peer]; delete connections[conn.peer]; });
-            conn.on('error', () => { /* Handle failed attempts silently */ });
+            conn.on('close', () => { delete players[conn.peer]; });
         }
 
+        // --- MOVEMENT & RENDER ---
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
@@ -142,11 +139,8 @@
             if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
-
             if (Math.abs(me.vx) > 0.1 || Math.abs(me.vy) > 0.1) {
-                Object.values(connections).forEach(c => {
-                    if(c.open) c.send({ type: 'move', player: me });
-                });
+                Object.values(connections).forEach(c => { if(c.open) c.send({ type: 'move', player: me }); });
             }
         }
 
@@ -154,9 +148,7 @@
             const input = document.getElementById('chat-in');
             if(!input.value) return;
             showChat(me.name, input.value);
-            Object.values(connections).forEach(c => {
-                if(c.open) c.send({ type: 'chat', name: me.name, text: input.value });
-            });
+            Object.values(connections).forEach(c => { if(c.open) c.send({ type: 'chat', name: me.name, text: input.value }); });
             input.value = '';
         }
 
@@ -174,7 +166,6 @@
             ctx.fillStyle = '#020205';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             update();
-
             players[me.id] = me;
             Object.values(players).forEach(p => {
                 ctx.shadowBlur = 20; ctx.shadowColor = p.color;
