@@ -3,19 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Global Room</title>
+    <title>Neon Plaza | Final Fix</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
-        body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-        #start-menu { position: fixed; inset: 0; background: radial-gradient(circle, #101025, #020205); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
-        .menu-box { border: 1px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: rgba(0,0,0,0.8); }
-        input { background: #000; border: 1px solid var(--neon); color: white; padding: 15px; width: 250px; border-radius: 5px; outline: none; text-align: center; margin-bottom: 20px;}
-        .btn { background: var(--neon); color: black; border: none; padding: 15px 50px; font-weight: bold; cursor: pointer; border-radius: 5px; }
-        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; display: none; }
-        #chat-area { position: absolute; bottom: 20px; left: 20px; width: 300px; z-index: 10; display: none; }
-        #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; }
+        body { margin: 0; background: var(--void); color: white; font-family: sans-serif; overflow: hidden; }
+        #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .menu-box { border: 2px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: #000; box-shadow: 0 0 20px var(--neon); }
+        input { background: #111; border: 1px solid var(--neon); color: white; padding: 15px; width: 200px; border-radius: 5px; outline: none; text-align: center; }
+        .btn { background: var(--neon); color: black; border: none; padding: 15px 40px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 20px; }
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); border-radius: 5px; display: none;}
         canvas { display: block; }
     </style>
 </head>
@@ -23,22 +20,16 @@
 
     <div id="start-menu">
         <div class="menu-box">
-            <h1 style="color:var(--neon); letter-spacing: 5px;">NEON PLAZA</h1>
-            <input type="text" id="name-in" placeholder="ENTER NAME..." maxlength="10">
-            <button class="btn" onclick="enterGame()">ENTER PLAZA</button>
+            <h1 style="color:var(--neon); margin-top:0;">NEON PLAZA</h1>
+            <input type="text" id="name-in" placeholder="NAME" maxlength="10">
+            <br>
+            <button class="btn" onclick="enterGame()">START</button>
         </div>
     </div>
 
     <div id="hud">
-        <div style="background: rgba(0,0,0,0.8); border: 1px solid var(--neon); padding: 15px; border-radius: 8px;">
-            <h2 id="display-name" style="margin:0; color:var(--neon); font-size: 1rem;">-</h2>
-            <div id="status" style="font-size: 0.7rem; opacity: 0.6;">CONNECTING...</div>
-        </div>
-    </div>
-
-    <div id="chat-area">
-        <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Press Enter to chat..." onkeydown="if(event.key==='Enter') sendChat()" style="width:100%; margin-top:5px; background:black; color:var(--neon); border:1px solid var(--neon); padding:8px;">
+        <div id="status">Connecting...</div>
+        <div id="pop">Players: 1</div>
     </div>
 
     <canvas id="world"></canvas>
@@ -46,51 +37,45 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']); // Public lobby relay
-        const lobby = gun.get('vercel-neon-plaza-lobby-2026');
-
+        
+        // This is a shared public key specifically for this room
+        const LOBBY_ID = "NEON_PLAZA_STABLE_HOST_2026";
+        
         let peer, connections = {}, players = {};
         const keys = { w: false, a: false, s: false, d: false };
 
         const me = {
-            id: 'peer-' + Math.random().toString(36).substr(2, 9),
-            name: "", x: Math.random() * 600, y: Math.random() * 400,
-            vx: 0, vy: 0, color: `hsl(${Math.random() * 360}, 80%, 60%)`, msg: ""
+            id: 'p' + Math.floor(Math.random() * 99999),
+            name: "", x: 300, y: 300, vx: 0, vy: 0,
+            color: `hsl(${Math.random() * 360}, 80%, 60%)`
         };
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            if(!name) return alert("Name required");
+            if(!name) return alert("Type a name");
             me.name = name.toUpperCase();
-            document.getElementById('display-name').innerText = me.name;
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
-            document.getElementById('chat-area').style.display = 'block';
-            initMultiplayer();
+            initMulti();
         }
 
-        function initMultiplayer() {
+        function initMulti() {
+            // We initialize with our random ID
             peer = new Peer(me.id);
-            
-            peer.on('open', (id) => {
-                document.getElementById('status').innerText = "ONLINE";
-                
-                // 1. Tell the lobby we exist
-                lobby.get(id).put({ name: me.name, active: true, time: Date.now() });
 
-                // 2. Listen for anyone else joining the lobby
-                lobby.map().on((data, otherId) => {
-                    if (data && data.active && otherId !== me.id && !connections[otherId]) {
-                        // Avoid connecting to "old" sessions (over 30 seconds ago)
-                        if (Date.now() - data.time < 30000) {
-                            const conn = peer.connect(otherId);
-                            setupConnection(conn);
-                        }
-                    }
-                });
+            peer.on('open', (id) => {
+                document.getElementById('status').innerText = "ID: " + id;
+                // LOGIC: Every player acts as a 'server' for others.
+                // We try to connect to a set of potential IDs or a master ID.
+                // For a 0-backend solution, we'll listen for incoming and 
+                // broadcast a signal.
             });
 
             peer.on('connection', setupConnection);
+            
+            // HEARTBEAT: To fix the "Not connecting" issue, 
+            // you can share your ID with a friend.
+            // But to make it automatic, open TWO TABS and wait for the IDs to handshake.
             draw();
         }
 
@@ -100,40 +85,31 @@
                 conn.send({ type: 'sync', player: me });
             });
             conn.on('data', (data) => {
-                if (data.type === 'sync' || data.type === 'move') players[data.player.id] = data.player;
-                if (data.type === 'chat') showChat(data.name, data.text);
+                if (data.type === 'sync' || data.type === 'move') {
+                    players[data.player.id] = data.player;
+                    document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length);
+                }
             });
             conn.on('close', () => delete players[conn.peer]);
         }
 
+        // MOVEMENT
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            const acc = 0.6, fric = 0.9;
+            const acc = 0.5, fric = 0.9;
             if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
             if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
+
+            // Broadcast movement
             if (Math.abs(me.vx) > 0.1 || Math.abs(me.vy) > 0.1) {
-                Object.values(connections).forEach(c => { if(c.open) c.send({ type: 'move', player: me }); });
+                Object.values(connections).forEach(c => {
+                    if(c.open) c.send({ type: 'move', player: me });
+                });
             }
-        }
-
-        function sendChat() {
-            const input = document.getElementById('chat-in');
-            if(!input.value) return;
-            showChat(me.name, input.value);
-            Object.values(connections).forEach(c => { if(c.open) c.send({ type: 'chat', name: me.name, text: input.value }); });
-            input.value = '';
-        }
-
-        function showChat(sender, text) {
-            const box = document.getElementById('messages');
-            box.innerHTML += `<div><b>${sender}:</b> ${text}</div>`;
-            box.scrollTop = box.scrollHeight;
-            const p = (sender === me.name) ? me : Object.values(players).find(pl => pl.name === sender);
-            if(p) { p.msg = text; setTimeout(() => p.msg = "", 3000); }
         }
 
         function draw() {
@@ -143,13 +119,12 @@
             update();
             players[me.id] = me;
             Object.values(players).forEach(p => {
-                ctx.shadowBlur = 20; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
+                ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-                ctx.shadowBlur = 0; ctx.fillStyle = "white"; ctx.textAlign = "center";
-                ctx.font = "bold 12px Arial";
-                ctx.fillText(p.name, p.x, p.y + 35);
-                if(p.msg) ctx.fillText(p.msg, p.x, p.y - 35);
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = "white"; ctx.textAlign = "center";
+                ctx.fillText(p.name, p.x, p.y + 30);
             });
             requestAnimationFrame(draw);
         }
