@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Secure Admin</title>
+    <title>Neon Plaza | Admin Authority</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        :root { --neon: #00f2ff; --admin: #ff3c00; --void: #020205; }
+        :root { --neon: #00f2ff; --admin: #ff3c00; --gold: #ffd700; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* UPDATED MENU */
+        /* MENU */
         #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
         .menu-input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 220px; border-radius: 5px; outline: none; text-align: center; margin-bottom: 10px; display: block; }
-        .admin-code-input { border-color: #444; font-size: 11px; color: #888; }
+        .admin-code-input { border-color: #444; font-size: 11px; color: #888; transition: 0.3s; }
         .admin-code-input:focus { border-color: var(--admin); color: var(--admin); }
         
         /* ADMIN PANEL */
@@ -25,7 +25,7 @@
         .admin-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .admin-btn { background: var(--admin); border: none; color: white; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; border-radius: 4px; }
         
-        /* HUD & CHAT */
+        /* UI */
         #hud, #chat-container { position: absolute; z-index: 10; pointer-events: none; }
         #hud { top: 20px; left: 20px; }
         #chat-container { bottom: 20px; left: 20px; width: 280px; pointer-events: all; }
@@ -56,10 +56,7 @@
         <div class="admin-row">
             <button class="admin-btn" onclick="sendAlert()">SEND GLOBAL ALERT</button>
         </div>
-        <div class="admin-row">
-            <button class="admin-btn" style="background:#555" onclick="resetWorld()">RESET WORLD GRAVITY</button>
-        </div>
-        <div style="font-size: 10px; opacity: 0.5; text-align: center; margin-top: 10px;">F2 TO HIDE</div>
+        <div style="font-size: 10px; opacity: 0.5; text-align: center;">PRESS F2 TO TOGGLE</div>
     </div>
 
     <div id="announcement">SERVER ALERT!</div>
@@ -73,7 +70,7 @@
 
     <div id="chat-container" style="display:none;">
         <div id="messages"></div>
-        <input type="text" id="chat-in" placeholder="Press Enter to talk..." onkeydown="if(event.key==='Enter') sendChat()">
+        <input type="text" id="chat-in" placeholder="Say something..." onkeydown="if(event.key==='Enter') sendChat()">
     </div>
 
     <canvas id="world"></canvas>
@@ -81,10 +78,10 @@
     <script>
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
-        const SECRET_ADMIN_CODE = "BELLAISBROWN1"; // <--- CHANGE YOUR CODE HERE
+        const SECRET_CODE = "Bellaisbrown1";
         
         let client, players = {}, keys = {};
-        const TOPIC = "v1/plaza/secure_admin/2026";
+        const TOPIC = "v1/plaza/authority/2026";
         
         let worldGravity = 0.6;
         let isAdmin = false;
@@ -93,18 +90,19 @@
             id: 'u' + Math.random().toString(36).substr(2, 5),
             name: "", x: 300, y: 300, vx: 0, vy: 0,
             color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-            msg: "", msgTime: 0
+            isAdm: false, msg: "", msgTime: 0
         };
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            const adminCode = document.getElementById('admin-in').value;
-            if(!name) return alert("Please enter a name");
+            const code = document.getElementById('admin-in').value;
+            if(!name) return alert("Enter a name!");
             
             me.name = name.toUpperCase();
-            if(adminCode === SECRET_ADMIN_CODE) {
+            if(code === SECRET_CODE) {
                 isAdmin = true;
-                console.log("Admin Privileges Unlocked");
+                me.isAdm = true;
+                me.color = "#ffffff"; // Admins get white core
             }
 
             document.getElementById('start-menu').style.display = 'none';
@@ -125,77 +123,68 @@
             client.on('message', (topic, message) => {
                 const data = JSON.parse(message.toString());
                 if (data.id === me.id) return;
-                if (data.type === 'chat') addChatMessage(data.name, data.text);
+                if (data.type === 'chat') addChatMessage(data.name, data.text, data.isAdm);
                 if (data.type === 'alert') triggerAlert(data.text);
                 if (data.type === 'grav') worldGravity = data.value;
                 if (data.type === 'pos') {
-                    if (!players[data.id]) players[data.id] = {...data, targetX: data.x, targetY: data.y};
-                    else { players[data.id].targetX = data.x; players[data.id].targetY = data.y; }
+                    if (!players[data.id]) players[data.id] = {...data, tx: data.x, ty: data.y};
+                    else { players[data.id].tx = data.x; players[data.id].ty = data.y; players[data.id].isAdm = data.isAdm; }
                 }
             });
             draw();
         }
 
-        // --- ADMIN CONTROLS ---
+        // --- ADMIN ---
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'F2') {
-                e.preventDefault();
-                if(!isAdmin) return alert("You are not an admin!");
-                const panel = document.getElementById('admin-panel');
-                panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+            if (e.key === 'F2' && isAdmin) {
+                const p = document.getElementById('admin-panel');
+                p.style.display = p.style.display === 'block' ? 'none' : 'block';
             }
             keys[e.key.toLowerCase()] = true;
         });
 
-        function changeGrav(val) {
-            worldGravity = val / 10;
+        function changeGrav(v) {
+            worldGravity = v / 10;
             client.publish(TOPIC, JSON.stringify({ type: 'grav', value: worldGravity, id: me.id }));
         }
 
         function sendAlert() {
-            const txt = prompt("Global Announcement:");
-            if(txt) client.publish(TOPIC, JSON.stringify({ type: 'alert', text: txt, id: me.id }));
+            const t = prompt("Alert message:");
+            if(t) client.publish(TOPIC, JSON.stringify({ type: 'alert', text: t, id: me.id }));
         }
 
-        function resetWorld() {
-            changeGrav(6);
-            document.getElementById('grav-slide').value = 6;
+        function triggerAlert(t) {
+            const e = document.getElementById('announcement');
+            e.innerText = t; e.style.display = 'block';
+            setTimeout(() => e.style.display = 'none', 4000);
         }
 
-        function triggerAlert(txt) {
-            const el = document.getElementById('announcement');
-            el.innerText = txt; el.style.display = 'block';
-            setTimeout(() => el.style.display = 'none', 4000);
-        }
-
-        // --- CORE LOGIC ---
+        // --- CORE ---
         function sendChat() {
-            const input = document.getElementById('chat-in');
-            if(!input.value) return;
-            client.publish(TOPIC, JSON.stringify({ type: 'chat', id: me.id, name: me.name, text: input.value }));
-            me.msg = input.value; me.msgTime = Date.now();
-            addChatMessage(me.name, input.value);
-            input.value = '';
+            const i = document.getElementById('chat-in');
+            if(!i.value) return;
+            client.publish(TOPIC, JSON.stringify({ type: 'chat', id: me.id, name: me.name, text: i.value, isAdm: isAdmin }));
+            me.msg = i.value; me.msgTime = Date.now();
+            addChatMessage(me.name, i.value, isAdmin);
+            i.value = '';
         }
 
-        function addChatMessage(name, text) {
-            const msgBox = document.getElementById('messages');
-            msgBox.innerHTML += `<div><b>${name}:</b> ${text}</div>`;
-            msgBox.scrollTop = msgBox.scrollHeight;
+        function addChatMessage(n, t, a) {
+            const m = document.getElementById('messages');
+            m.innerHTML += `<div><b style="color:${a ? 'var(--admin)' : 'var(--neon)'}">${a ? '[ADMIN] ' : ''}${n}:</b> ${t}</div>`;
+            m.scrollTop = m.scrollHeight;
         }
 
         window.onkeyup = (e) => { keys[e.key.toLowerCase()] = false; };
 
         function update() {
-            const fric = 0.9;
+            const f = 0.9;
             if (keys['w']) me.vy -= worldGravity; if (keys['s']) me.vy += worldGravity;
             if (keys['a']) me.vx -= worldGravity; if (keys['d']) me.vx += worldGravity;
-            me.vx *= fric; me.vy *= fric;
-            me.x += me.vx; me.y += me.vy;
+            me.vx *= f; me.vy *= f; me.x += me.vx; me.y += me.vy;
 
             Object.values(players).forEach(p => {
-                p.x += (p.targetX - p.x) * 0.2;
-                p.y += (p.targetY - p.y) * 0.2;
+                p.x += (p.tx - p.x) * 0.2; p.y += (p.ty - p.y) * 0.2;
             });
             document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length + 1);
         }
@@ -205,17 +194,35 @@
             ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             update();
             [...Object.values(players), me].forEach(p => {
+                // Admin Aura
+                if(p.isAdm) {
+                    ctx.shadowBlur = 30; ctx.shadowColor = "red";
+                    ctx.strokeStyle = "red"; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, Math.PI*2); ctx.stroke();
+                }
+
                 ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
+                
                 ctx.shadowBlur = 0; ctx.fillStyle = "white"; ctx.textAlign = "center";
                 ctx.font = "bold 12px sans-serif";
                 ctx.fillText(p.name, p.x, p.y + 35);
-                if (p.msg && Date.now() - p.msgTime < 5000) ctx.fillText(p.msg, p.x, p.y - 30);
+
+                // Admin Crown Icon
+                if(p.isAdm) {
+                    ctx.fillStyle = "gold";
+                    ctx.font = "16px Arial";
+                    ctx.fillText("👑", p.x, p.y - 20);
+                }
+
+                if (p.msg && Date.now() - p.msgTime < 5000) {
+                    ctx.fillStyle = "white"; ctx.font = "italic 12px sans-serif";
+                    ctx.fillText(p.msg, p.x, p.y - (p.isAdm ? 40 : 25));
+                }
             });
             requestAnimationFrame(draw);
         }
     </script>
 </body>
 </html>
-
