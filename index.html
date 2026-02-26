@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Plaza | Final Fix</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <title>Neon Plaza | No-Key Multi</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         :root { --neon: #00f2ff; --void: #020205; }
         body { margin: 0; background: var(--void); color: white; font-family: sans-serif; overflow: hidden; }
         #start-menu { position: fixed; inset: 0; background: #050510; display: flex; align-items: center; justify-content: center; z-index: 100; }
-        .menu-box { border: 2px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: #000; box-shadow: 0 0 20px var(--neon); }
-        input { background: #111; border: 1px solid var(--neon); color: white; padding: 15px; width: 200px; border-radius: 5px; outline: none; text-align: center; }
-        .btn { background: var(--neon); color: black; border: none; padding: 15px 40px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 20px; }
-        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); border-radius: 5px; display: none;}
+        .menu-box { border: 2px solid var(--neon); padding: 40px; border-radius: 15px; text-align: center; background: #000; }
+        input { background: #111; border: 1px solid var(--neon); color: white; padding: 12px; width: 180px; border-radius: 5px; outline: none; text-align: center; }
+        .btn { background: var(--neon); color: black; border: none; padding: 12px 30px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 15px; }
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid var(--neon); display: none; border-radius: 5px; }
         canvas { display: block; }
     </style>
 </head>
@@ -20,7 +20,7 @@
 
     <div id="start-menu">
         <div class="menu-box">
-            <h1 style="color:var(--neon); margin-top:0;">NEON PLAZA</h1>
+            <h1 style="color:var(--neon); margin:0 0 20px;">NEON PLAZA</h1>
             <input type="text" id="name-in" placeholder="NAME" maxlength="10">
             <br>
             <button class="btn" onclick="enterGame()">START</button>
@@ -28,7 +28,7 @@
     </div>
 
     <div id="hud">
-        <div id="status">Connecting...</div>
+        <div id="status">Connecting to Public Relay...</div>
         <div id="pop">Players: 1</div>
     </div>
 
@@ -38,21 +38,20 @@
         const canvas = document.getElementById('world');
         const ctx = canvas.getContext('2d');
         
-        // This is a shared public key specifically for this room
-        const LOBBY_ID = "NEON_PLAZA_STABLE_HOST_2026";
-        
-        let peer, connections = {}, players = {};
+        let client;
+        let players = {};
         const keys = { w: false, a: false, s: false, d: false };
+        const ROOM_TOPIC = "v1/plaza/global/main"; // Unique topic for everyone using this code
 
         const me = {
-            id: 'p' + Math.floor(Math.random() * 99999),
+            id: 'u' + Math.random().toString(36).substr(2, 5),
             name: "", x: 300, y: 300, vx: 0, vy: 0,
             color: `hsl(${Math.random() * 360}, 80%, 60%)`
         };
 
         function enterGame() {
             const name = document.getElementById('name-in').value;
-            if(!name) return alert("Type a name");
+            if(!name) return alert("Enter Name");
             me.name = name.toUpperCase();
             document.getElementById('start-menu').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
@@ -60,73 +59,82 @@
         }
 
         function initMulti() {
-            // We initialize with our random ID
-            peer = new Peer(me.id);
+            // Using a public websocket relay (No API key needed)
+            client = mqtt.connect('wss://test.mosquitto.org:8081');
 
-            peer.on('open', (id) => {
-                document.getElementById('status').innerText = "ID: " + id;
-                // LOGIC: Every player acts as a 'server' for others.
-                // We try to connect to a set of potential IDs or a master ID.
-                // For a 0-backend solution, we'll listen for incoming and 
-                // broadcast a signal.
+            client.on('connect', () => {
+                document.getElementById('status').innerText = "ONLINE";
+                client.subscribe(ROOM_TOPIC);
+                // Send an "I'm here" message
+                broadcast();
             });
 
-            peer.on('connection', setupConnection);
-            
-            // HEARTBEAT: To fix the "Not connecting" issue, 
-            // you can share your ID with a friend.
-            // But to make it automatic, open TWO TABS and wait for the IDs to handshake.
+            client.on('message', (topic, message) => {
+                const data = JSON.parse(message.toString());
+                if (data.id !== me.id) {
+                    players[data.id] = data;
+                    document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length + 1);
+                }
+            });
+
             draw();
         }
 
-        function setupConnection(conn) {
-            conn.on('open', () => {
-                connections[conn.peer] = conn;
-                conn.send({ type: 'sync', player: me });
-            });
-            conn.on('data', (data) => {
-                if (data.type === 'sync' || data.type === 'move') {
-                    players[data.player.id] = data.player;
-                    document.getElementById('pop').innerText = "Players: " + (Object.keys(players).length);
-                }
-            });
-            conn.on('close', () => delete players[conn.peer]);
+        function broadcast() {
+            if (client && client.connected) {
+                client.publish(ROOM_TOPIC, JSON.stringify(me));
+            }
         }
 
-        // MOVEMENT
         window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
         window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
 
         function update() {
             const acc = 0.5, fric = 0.9;
-            if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
-            if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
+            let moved = false;
+            if (keys.w) { me.vy -= acc; moved = true; }
+            if (keys.s) { me.vy += acc; moved = true; }
+            if (keys.a) { me.vx -= acc; moved = true; }
+            if (keys.d) { me.vx += acc; moved = true; }
+
             me.vx *= fric; me.vy *= fric;
             me.x += me.vx; me.y += me.vy;
 
-            // Broadcast movement
-            if (Math.abs(me.vx) > 0.1 || Math.abs(me.vy) > 0.1) {
-                Object.values(connections).forEach(c => {
-                    if(c.open) c.send({ type: 'move', player: me });
-                });
-            }
+            // Simple screen wrap
+            if (me.x < 0) me.x = canvas.width;
+            if (me.x > canvas.width) me.x = 0;
+            if (me.y < 0) me.y = canvas.height;
+            if (me.y > canvas.height) me.y = 0;
+
+            if (moved || Math.abs(me.vx) > 0.1) broadcast();
         }
 
         function draw() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             ctx.fillStyle = '#020205'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
             update();
-            players[me.id] = me;
+
+            // Draw Others
             Object.values(players).forEach(p => {
-                ctx.fillStyle = p.color;
-                ctx.shadowBlur = 15; ctx.shadowColor = p.color;
-                ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = "white"; ctx.textAlign = "center";
-                ctx.fillText(p.name, p.x, p.y + 30);
+                drawPlayer(p);
             });
+
+            // Draw Me
+            drawPlayer(me);
+
             requestAnimationFrame(draw);
+        }
+
+        function drawPlayer(p) {
+            ctx.shadowBlur = 15; ctx.shadowColor = p.color;
+            ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "white"; ctx.textAlign = "center";
+            ctx.font = "bold 12px sans-serif";
+            ctx.fillText(p.name, p.x, p.y + 35);
         }
     </script>
 </body>
