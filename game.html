@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Neon Plaza</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        :root { --neon: #00f2ff; --void: #020205; }
+        body { margin: 0; background: var(--void); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
+        .panel { background: rgba(0,0,0,0.9); border: 1px solid var(--neon); padding: 15px; border-radius: 8px; pointer-events: all; }
+        
+        .color-menu { display: flex; gap: 8px; margin-top: 10px; }
+        .color-opt { width: 25px; height: 25px; border-radius: 50%; cursor: pointer; border: 2px solid #333; }
+
+        #chat-area { position: absolute; bottom: 20px; left: 20px; width: 300px; z-index: 10; }
+        #messages { height: 100px; overflow-y: auto; font-size: 13px; color: #888; margin-bottom: 5px; }
+        input { background: #000; border: 1px solid var(--neon); color: var(--neon); padding: 10px; width: 100%; box-sizing: border-box; outline: none; }
+        
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <div class="panel">
+            <h2 style="margin:0; color:var(--neon)">NEON PLAZA</h2>
+            <div id="status">Connecting to Global Lobby...</div>
+            <div class="color-menu">
+                <div class="color-opt" style="background:#00f2ff" onclick="changeColor('#00f2ff')"></div>
+                <div class="color-opt" style="background:#ff007b" onclick="changeColor('#ff007b')"></div>
+                <div class="color-opt" style="background:#bc13fe" onclick="changeColor('#bc13fe')"></div>
+                <div class="color-opt" style="background:#00ff9d" onclick="changeColor('#00ff9d')"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="chat-area">
+        <div id="messages"></div>
+        <input type="text" id="chat-in" placeholder="Say hello..." onkeydown="if(event.key==='Enter') sendChat()">
+    </div>
+
+    <canvas id="world"></canvas>
+
+    <script>
+        const canvas = document.getElementById('world');
+        const ctx = canvas.getContext('2d');
+        const TOPIC = "neon_plaza_discovery_v1"; // The global lobby channel
+        
+        let peer, mqttClient, connections = {}, players = {};
+        const keys = { w: false, a: false, s: false, d: false };
+        
+        const me = {
+            id: 'p-' + Math.random().toString(36).substr(2, 6),
+            x: Math.random() * 400 + 100,
+            y: Math.random() * 400 + 100,
+            vx: 0, vy: 0,
+            color: '#00f2ff',
+            msg: ""
+        };
+
+        // 1. AUTO-DISCOVERY LOGIC
+        function initMultiplayer() {
+            peer = new Peer(me.id);
+
+            // Connect to a public MQTT broker to find other players
+            mqttClient = mqtt.connect('wss://test.mosquitto.org:8081');
+
+            mqttClient.on('connect', () => {
+                mqttClient.subscribe(TOPIC);
+                // Tell everyone "I am here!"
+                mqttClient.publish(TOPIC, me.id);
+                document.getElementById('status').innerText = "Online in Global Lobby";
+            });
+
+            mqttClient.on('message', (topic, message) => {
+                const strangerId = message.toString();
+                if (strangerId !== me.id && !connections[strangerId]) {
+                    // We found a new person! Reach out to them.
+                    const conn = peer.connect(strangerId);
+                    setupConnection(conn);
+                }
+            });
+
+            peer.on('connection', setupConnection);
+        }
+
+        function setupConnection(conn) {
+            conn.on('open', () => {
+                connections[conn.peer] = conn;
+                conn.send({ type: 'sync', player: me });
+            });
+            conn.on('data', (data) => {
+                if (data.type === 'sync' || data.type === 'move') {
+                    players[data.player.id] = data.player;
+                }
+                if (data.type === 'chat') showChat(data.id, data.text);
+            });
+            conn.on('close', () => { delete players[conn.peer]; });
+        }
+
+        // 2. SMOOTH MOVEMENT
+        window.onkeydown = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; };
+        window.onkeyup = (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; };
+
+        function update() {
+            const acc = 0.5, fric = 0.92;
+            if (keys.w) me.vy -= acc; if (keys.s) me.vy += acc;
+            if (keys.a) me.vx -= acc; if (keys.d) me.vx += acc;
+            me.vx *= fric; me.vy *= fric;
+            me.x += me.vx; me.y += me.vy;
+
+            if (Math.abs(me.vx) > 0.05 || Math.abs(me.vy) > 0.05) {
+                broadcast({ type: 'move', player: me });
+            }
+        }
+
+        function broadcast(data) {
+            Object.values(connections).forEach(c => { if(c.open) c.send(data); });
+        }
+
+        function changeColor(c) { me.color = c; broadcast({ type: 'move', player: me }); }
+
+        function sendChat() {
+            const input = document.getElementById('chat-in');
+            if(!input.value) return;
+            showChat('me', input.value);
+            broadcast({ type: 'chat', id: me.id, text: input.value });
+            input.value = '';
+        }
+
+        function showChat(sender, text) {
+            const box = document.getElementById('messages');
+            box.innerHTML += `<div><b>${sender === 'me' ? 'YOU' : 'GUEST'}:</b> ${text}</div>`;
+            box.scrollTop = box.scrollHeight;
+            const p = players[sender === 'me' ? me.id : sender];
+            if(p) { p.msg = text; setTimeout(() => p.msg = "", 3000); }
+        }
+
+        function draw() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            ctx.fillStyle = '#020205';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            update();
+
+            players[me.id] = me; // Keep self in player list
+            Object.values(players).forEach(p => {
+                ctx.shadowBlur = 20; ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI*2); ctx.fill();
+                ctx.shadowBlur = 0;
+                if(p.msg) {
+                    ctx.fillStyle = "white"; ctx.textAlign = "center";
+                    ctx.fillText(p.msg, p.x, p.y - 30);
+                }
+            });
+            requestAnimationFrame(draw);
+        }
+
+        initMultiplayer();
+        draw();
+    </script>
+</body>
+</html>
